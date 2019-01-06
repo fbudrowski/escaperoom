@@ -15,4 +15,19 @@
 
 
 void player(size_t id){
+    printf("Player %zu\n", id);
+    char inputFilename[20];
+    sprintf(inputFilename, "player-%zu.in", id);
+    char outputFilename[20];
+    sprintf(outputFilename, "player-%zu.out", id);
+
+    int inputFd = open(inputFilename, O_RDONLY);
+    if (inputFd < 0) syserr("Input open failed");
+    int outputFd = open(outputFilename, O_RDWR);
+    if (outputFd < 0) syserr("Output open failed");
+
+    printf("Opened files %s (%d), %s (%d)\n", inputFilename, inputFd, outputFilename, outputFd);
+
+    close(inputFd);
+    close(outputFd);
 }

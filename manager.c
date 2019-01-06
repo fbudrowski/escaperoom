@@ -294,12 +294,12 @@ struct Storage *getFromInput() {
     for (size_t i = 0; i < m; i++) {
         scanf("\n%c %zu", &(storage->rooms[i].type), &(storage->rooms[i].capacity)); // NEED this \n
         storage->rooms[i].taken = 0;
-//        printf("%c %zu %i\n", storage->rooms[i].type, storage->rooms[i].capacity, storage->rooms[i].taken); //Test print
+        printf("%zu (%zu), %c %zu %i\n", i, m, storage->rooms[i].type, storage->rooms[i].capacity, storage->rooms[i].taken); //Test print
     }
     for (size_t i = 1; i <= n; i++){
         storage->freePlayer[i] = 1;
     }
-
+    printf("OK\n");
     qsort(storage->rooms, m, sizeof(struct Room), compRooms);
 
     setUpLists(&storage->listPool, &storage->listOfPlans, &storage->planPool);
@@ -307,8 +307,10 @@ struct Storage *getFromInput() {
     char filename[30];
     for (size_t i = 1; i <= n; i++){
         sprintf(filename, "player-%zu.in", i);
+
         int fd = open(filename, O_RDONLY);
-        char a; scanf("%c", &a);
+        char a; read(fd, &a, 1);
+        printf("Player %zu has %c type\n", i, a);
         storage->player_prefd_room[i] = a;
         ++storage->allForTypes[a-SMALLEST_ROOM];
         ++storage->remainingForTypes[a-SMALLEST_ROOM];
@@ -324,6 +326,7 @@ int main() {
     size_t n = storage->player_count;
 
 
+    printf("OK\n");
     int pid;
     for (size_t i = 1; i <= n; i++) {
         pid = fork();
@@ -340,6 +343,7 @@ int main() {
                 continue;
         }
     }
+    printf("OK\n");
     for (size_t i = 1; i <= n; i++) {
         wait(0);
     }
