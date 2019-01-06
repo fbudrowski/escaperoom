@@ -13,6 +13,6 @@
 #include "err.h"
 
 
+
 void player(size_t id){
-    printf("ID = %zu\n", id);
 }
