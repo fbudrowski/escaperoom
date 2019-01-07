@@ -8,74 +8,22 @@
 #include <fcntl.h>           /* For O_* constants */
 #include <assert.h>
 #include <memory.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
 #include "err.h"
-
-#define MAX_PLAYERS 1026
-#define COLOR_ZERO (MAX_PLAYERS + 100)
-#define MAX_ROOMS 1024
-#define SMALLEST_ROOM 'A'
-#define BIGGEST_ROOM 'Z'
-#define ROOM_TYPES_COUNT (BIGGEST_ROOM - SMALLEST_ROOM +1)
-
-#define STORAGE "/storage"
-
-#define MAX_LIST_ELEMS 32768
-#define MAX_PLANS 8096
-
-#define LST_NULL (MAX_LIST_ELEMS + 10)
-#define LST_INACTIVE (LST_NULL + 1)
-
-#define PLAN_INACTIVE 0
-#define PLAN_NULL (MAX_PLANS + 2)
-
-void player(size_t id);
-
-typedef size_t plan_index_t;
-typedef size_t node_index_t;
-
-struct Room {
-    char type;
-    size_t capacity;
-    int taken;
-};
-
-struct ListNode {
-    size_t value;
-    node_index_t next;
-};
-
-struct ForwardList{ // : All nodes nexts to LST_INACTIVE
-    node_index_t starting;
-    node_index_t ending;
-};
-
-struct ListPool{
-    struct ListNode nodes[MAX_LIST_ELEMS];
-    node_index_t currentInd;
-};
+#include "storage.h"
 
 
-struct Plan{
-    char room_type;
-    int elem_count;
-    struct ForwardList elements;
-};
-
-struct PlanPool{
-    struct Plan plans[MAX_PLANS];
-    plan_index_t currentInd;
-};
-
-plan_index_t getEmptyPlan(struct PlanPool *planPool);
-int listAppend(struct ForwardList *list, struct ListPool *pool, size_t value);
-void listClear(struct ForwardList *list, struct ListPool *pool);
-plan_index_t addNewPlan(struct ForwardList *list, struct ListPool *listPool, struct PlanPool *planPool);
-void setUpLists(struct ListPool* pool, struct ForwardList* list, struct PlanPool* planPool);
-void deletePlan(struct ForwardList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t prevNode);
-
-
-
-
+int compRooms(const void *room1, const void *room2) {
+    const struct Room *r1 = room1, *r2 = room2;
+    if (r1->capacity == r2->capacity) {
+        if (r1->type < r2->type) return -1;
+        if (r1->type > r2->type) return 1;
+        return 0;
+    }
+    if (r1->capacity < r2->capacity) return -1;
+    return 1;
+}
 
 
 plan_index_t getEmptyPlan(struct PlanPool *planPool){
@@ -90,7 +38,6 @@ plan_index_t getEmptyPlan(struct PlanPool *planPool){
     }
     return PLAN_NULL;
 }
-
 
 int listAppend(struct ForwardList *list, struct ListPool *pool, size_t value){
     if (list->ending == LST_NULL || list->ending == LST_INACTIVE){
@@ -139,6 +86,7 @@ plan_index_t addNewPlan(struct ForwardList *list, struct ListPool *listPool, str
     return planId;
 }
 
+
 void setUpLists(struct ListPool* pool, struct ForwardList* list, struct PlanPool* planPool){
     pool->currentInd = 0;
     for(int i = 0; i < MAX_LIST_ELEMS; i++) {
@@ -154,37 +102,13 @@ void setUpLists(struct ListPool* pool, struct ForwardList* list, struct PlanPool
 }
 
 
+
 void deletePlan(struct ForwardList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t prevNode) {
     node_index_t currentNode = listPool->nodes[prevNode].next;
     assert(currentNode != LST_NULL && currentNode != LST_INACTIVE);
     listPool->nodes[prevNode].next = listPool->nodes[currentNode].next;
     listPool->nodes[currentNode].next = LST_INACTIVE;
 }
-
-struct Storage {
-    int maxSizedRoom[ROOM_TYPES_COUNT];
-    int biggestFree[ROOM_TYPES_COUNT];
-    int freePlayer[MAX_PLAYERS];
-    char player_prefd_room[MAX_PLAYERS];
-    size_t player_count;
-    size_t room_count;
-    struct Room rooms[MAX_ROOMS];
-
-    int allForTypes[ROOM_TYPES_COUNT];
-
-    int remainingForElems[MAX_PLAYERS];
-    int remainingForTypes[ROOM_TYPES_COUNT];
-
-    struct ListPool listPool;
-    struct ForwardList listOfPlans;
-    struct PlanPool planPool;
-};
-
-int initCheckPlan(struct Storage *storage, plan_index_t planIndex);
-int checkPlan(struct Storage *storage, plan_index_t planIndex);
-
-struct Storage *getFromInput();
-
 
 int initCheckPlan(struct Storage *storage, plan_index_t planIndex){
     struct Plan *plan = &storage->planPool.plans[planIndex];
@@ -197,7 +121,7 @@ int initCheckPlan(struct Storage *storage, plan_index_t planIndex){
     int remainingElems[ROOM_TYPES_COUNT];
     int count = 0;
     for (int i = 0; i < ROOM_TYPES_COUNT; ++i){
-        remainingElems[i] = storage->allForTypes[i];
+        remainingElems[i] = storage->allPlayersForTypes[i];
     }
     while (nodeIndex != LST_NULL && nodeIndex != LST_INACTIVE){
         size_t value = listPool->nodes[nodeIndex].value;
@@ -205,7 +129,7 @@ int initCheckPlan(struct Storage *storage, plan_index_t planIndex){
         if (value >= COLOR_ZERO){
             color = value - COLOR_ZERO;
         } else{
-            color = (size_t) (storage->player_prefd_room[value] - SMALLEST_ROOM);
+            color = (size_t) (storage->playerPrefdRoom[value] - SMALLEST_ROOM);
         }
         if (remainingElems[color] == 0){
             return -2;
@@ -226,13 +150,13 @@ int checkPlan(struct Storage *storage, plan_index_t planIndex){
     struct ListPool *listPool = &storage->listPool;
     node_index_t nodeIndex = plan->elements.starting;
 
-    if(storage->biggestFree[plan->room_type-SMALLEST_ROOM] < plan->elem_count){
+    if(storage->biggestFreeRoom[plan->room_type-SMALLEST_ROOM] < plan->elem_count){
         return -1;
     }
 
     int remainingElems[ROOM_TYPES_COUNT];
     for (int i = 0; i < ROOM_TYPES_COUNT; ++i){
-        remainingElems[i] = storage->remainingForTypes[i];
+        remainingElems[i] = storage->remainingPlayersForTypes[i];
     }
     while (nodeIndex != LST_NULL && nodeIndex != LST_INACTIVE){
         size_t value = listPool->nodes[nodeIndex].value;
@@ -240,7 +164,10 @@ int checkPlan(struct Storage *storage, plan_index_t planIndex){
         if (value >= COLOR_ZERO){
             color = value - COLOR_ZERO;
         } else{
-            color = (size_t) (storage->player_prefd_room[value] - SMALLEST_ROOM);
+            if (storage->freePlayer[value] == 0){
+                return -4;
+            }
+            color = (size_t) (storage->playerPrefdRoom[value] - SMALLEST_ROOM);
         }
         if (remainingElems[color] == 0){
             return -2;
@@ -250,17 +177,6 @@ int checkPlan(struct Storage *storage, plan_index_t planIndex){
         nodeIndex = listPool->nodes[nodeIndex].next;
     }
 
-    return 1;
-}
-
-int compRooms(const void *room1, const void *room2) {
-    const struct Room *r1 = room1, *r2 = room2;
-    if (r1->capacity == r2->capacity) {
-        if (r1->type < r2->type) return -1;
-        if (r1->type > r2->type) return 1;
-        return 0;
-    }
-    if (r1->capacity < r2->capacity) return -1;
     return 1;
 }
 
@@ -284,16 +200,27 @@ struct Storage *getFromInput() {
         syserr("Mapping fail");
     }
 
-    storage->player_count = n;
-    storage->room_count = m;
+    storage->playerCount = n;
+    storage->roomCount = m;
     for(int i = 0; i < ROOM_TYPES_COUNT; i++){
-        storage->biggestFree[i] = -1;
+        storage->biggestFreeRoom[i] = -1;
         storage->maxSizedRoom[i] = -1;
+        storage->allPlayersForTypes[i] = 0;
+        storage->remainingPlayersForTypes[i] = 0;
     }
 
     for (size_t i = 0; i < m; i++) {
-        scanf("\n%c %zu", &(storage->rooms[i].type), &(storage->rooms[i].capacity)); // NEED this \n
+        char type;
+        size_t capacity;
+        scanf("\n%c %zu", &type, &capacity); // NEED this \n
+        storage->rooms[i].type = type;
+        storage->rooms[i].capacity = capacity;
         storage->rooms[i].taken = 0;
+        storage->rooms[i].roomOriginalId = i + 1;
+        if (capacity > storage->maxSizedRoom[type-SMALLEST_ROOM]){
+            storage->maxSizedRoom[type-SMALLEST_ROOM] = capacity;
+            storage->biggestFreeRoom[type-SMALLEST_ROOM] = capacity;
+        }
         printf("%zu (%zu), %c %zu %i\n", i, m, storage->rooms[i].type, storage->rooms[i].capacity, storage->rooms[i].taken); //Test print
     }
     for (size_t i = 1; i <= n; i++){
@@ -308,22 +235,58 @@ struct Storage *getFromInput() {
     for (size_t i = 1; i <= n; i++){
         sprintf(filename, "player-%zu.in", i);
 
-        int fd = open(filename, O_RDONLY);
-        char a; read(fd, &a, 1);
+        int ithFd = open(filename, O_RDONLY);
+        if (ithFd < 0) syserr("Bad read");
+        char a; read(ithFd, &a, 1);
         printf("Player %zu has %c type\n", i, a);
-        storage->player_prefd_room[i] = a;
-        ++storage->allForTypes[a-SMALLEST_ROOM];
-        ++storage->remainingForTypes[a-SMALLEST_ROOM];
-        close(fd);
+        storage->playerPrefdRoom[i] = a;
+        ++storage->allPlayersForTypes[a-SMALLEST_ROOM];
+        close(ithFd);
     }
+    struct Semaphores sems;
+    initSems(storage, &sems);
 
     return storage;
 }
 
+int initSems(struct Storage const *storage, struct Semaphores* semaphores){ // Unix semaphores
+    int sem_protection = semget(SEM_PROTECTION, 1, IPC_CREAT | 0600);
+    int sems_entry = semget(SEMS_ENTRY, (int) storage->playerCount, IPC_CREAT | 0600);
+    int sems_exit = semget(SEMS_EXIT, (int) storage->playerCount, IPC_CREAT | 0600);
+    if (sem_protection == -1 || sems_entry == -1 || sems_exit == -1) return -1;
+    if (semctl(sem_protection, 0, SETVAL, 0) == -1){
+        return -2;
+    }
+    for (int i = 0; i < storage->playerCount; ++i){
+        if (semctl(sems_entry, i, SETVAL, 0) == -1){
+            return -2;
+        }
+        if (semctl(sems_exit, i, SETVAL, 0) == -1){
+            return -2;
+        }
+    }
+    semaphores->protection = sem_protection;
+    semaphores->entry = sems_entry;
+    semaphores->exit = sems_exit;
+    return 0;
+}
+
+int getSems(struct Storage const *storage, struct Semaphores* semaphores){ // Unix semaphores
+    int sem_protection = semget(SEM_PROTECTION, 1, 0600);
+    int sems_entry = semget(SEMS_ENTRY, (int) storage->playerCount, 0600);
+    int sems_exit = semget(SEMS_EXIT, (int) storage->playerCount, 0600);
+    if (sem_protection == -1 || sems_entry == -1 || sems_exit == -1) return -1;
+    semaphores->protection = sem_protection;
+    semaphores->entry = sems_entry;
+    semaphores->exit = sems_exit;
+    return 0;
+}
+
+
 
 int main() {
     struct Storage* storage = getFromInput();
-    size_t n = storage->player_count;
+    size_t n = storage->playerCount;
 
 
     printf("OK\n");

@@ -16,5 +16,5 @@ macro (add_executable _name)
     endif()
 endmacro()
 
-add_executable(manager manager.c player.c)
+add_executable(manager manager.c player.c storage.h)
 target_link_libraries(manager rt pthread)
