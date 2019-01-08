@@ -3,9 +3,9 @@
 
 /* wypisuje informacje o blednym zakonczeniu funkcji systemowej
 i konczy dzialanie */
-extern void syserr(const char *fmt, ...);
 
-/* wypisuje informacje o bledzie i konczy dzialanie */
-extern void fatal(const char *fmt, ...);
+#define WRITE_ERR(monit) {fprintf(stderr, "ERROR: %s\n", monit);}
+#define SYSTEM(x) if(x) {fprintf(stderr, "ERROR: "); exit(1);}
+#define SYSTEM2(x, monit) if(x) {WRITE_ERR(monit); exit(1);}
 
 #endif

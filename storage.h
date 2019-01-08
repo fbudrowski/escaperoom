@@ -21,6 +21,7 @@
 
 #define PLAN_INACTIVE 0
 #define PLAN_NULL (MAX_PLANS + 2)
+#define PLAN_PRESTART (MAX_LIST_ELEMS + 3)
 
 
 void player(size_t id);
@@ -40,9 +41,10 @@ int compRooms(const void *room1, const void *room2);
 struct ListNode {
     size_t value;
     node_index_t next;
+    node_index_t prev;
 };
 
-struct ForwardList { // : All nodes nexts to LST_INACTIVE
+struct LinkedList { // : All nodes nexts to LST_INACTIVE
     node_index_t starting;
     node_index_t ending;
 };
@@ -57,7 +59,7 @@ struct Plan {
     int assignedRoomNewId;
     char room_type;
     int elem_count;
-    struct ForwardList elements;
+    struct LinkedList elements;
 };
 
 struct PlanPool {
@@ -66,11 +68,11 @@ struct PlanPool {
 };
 
 plan_index_t getEmptyPlan(struct PlanPool *planPool);
-int listAppend(struct ForwardList *list, struct ListPool *pool, size_t value);
-void listClear(struct ForwardList *list, struct ListPool *pool);
-plan_index_t addNewPlan(struct ForwardList *list, struct ListPool *listPool, struct PlanPool *planPool);
-void setUpLists(struct ListPool *pool, struct ForwardList *list, struct PlanPool *planPool);
-void deletePlan(struct ForwardList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t prevNode);
+int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value);
+void listClear(struct LinkedList *list, struct ListPool *pool);
+plan_index_t addNewPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool);
+void setUpLists(struct ListPool *pool, struct LinkedList *list, struct PlanPool *planPool);
+void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode);
 
 
 struct Storage {
@@ -89,7 +91,7 @@ struct Storage {
     int remainingPlayersForTypes[ROOM_TYPES_COUNT];
 
     struct ListPool listPool;
-    struct ForwardList listOfPlans;
+    struct LinkedList listOfPlans;
     struct PlanPool planPool;
 };
 

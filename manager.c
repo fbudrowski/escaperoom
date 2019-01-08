@@ -39,31 +39,33 @@ plan_index_t getEmptyPlan(struct PlanPool *planPool){
     return PLAN_NULL;
 }
 
-int listAppend(struct ForwardList *list, struct ListPool *pool, size_t value){
+int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value){
+    node_index_t i = pool->currentInd;
+    size_t ct = 0;
+    for (; ct < MAX_LIST_ELEMS; ++ct, ++i) {
+        if (i >= MAX_LIST_ELEMS)
+            i -= MAX_LIST_ELEMS;
+        if (pool->nodes[i].next == LST_INACTIVE){
+            pool->nodes[list->ending].next = i;
+            pool->nodes[i].prev = i;
+            break;
+        }
+    }
+    if (ct >= MAX_LIST_ELEMS)
+        return -1;
+
     if (list->ending == LST_NULL || list->ending == LST_INACTIVE){
-        list->starting = list->ending = 0;
+        list->starting = list->ending = i;
     }
     else{
-        node_index_t i = pool->currentInd;
-        size_t ct = 0;
-        for (; ct < MAX_LIST_ELEMS; ++ct, ++i) {
-            if (i >= MAX_LIST_ELEMS)
-                i -= MAX_LIST_ELEMS;
-            if (pool->nodes[i].next == LST_INACTIVE){
-                pool->nodes[list->ending].next = i;
-                list->ending = i;
-                break;
-            }
-        }
-        if (ct >= MAX_LIST_ELEMS)
-            return -1;
+        list->ending = i;
     }
-    pool->nodes[list->ending].value = value;
-    pool->nodes[list->ending].next = LST_NULL;
+    pool->nodes[i].value = value;
+    pool->nodes[i].next = LST_NULL;
     return 0;
 }
 
-void listClear(struct ForwardList *list, struct ListPool *pool){
+void listClear(struct LinkedList *list, struct ListPool *pool){
     node_index_t current = list->starting;
     while(current != LST_INACTIVE && current != LST_NULL){
         node_index_t prev = current;
@@ -73,7 +75,7 @@ void listClear(struct ForwardList *list, struct ListPool *pool){
     list->starting = list->ending = LST_INACTIVE;
 }
 
-plan_index_t addNewPlan(struct ForwardList *list, struct ListPool *listPool, struct PlanPool *planPool){
+plan_index_t addNewPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool){
     plan_index_t planId = getEmptyPlan(planPool);
     if (planId == PLAN_NULL){
         return PLAN_NULL;
@@ -87,10 +89,11 @@ plan_index_t addNewPlan(struct ForwardList *list, struct ListPool *listPool, str
 }
 
 
-void setUpLists(struct ListPool* pool, struct ForwardList* list, struct PlanPool* planPool){
+void setUpLists(struct ListPool* pool, struct LinkedList* list, struct PlanPool* planPool){
     pool->currentInd = 0;
     for(int i = 0; i < MAX_LIST_ELEMS; i++) {
         pool->nodes[i].next = LST_INACTIVE;
+        pool->nodes[i].prev = LST_INACTIVE;
     }
     list->starting = LST_NULL;
     list->ending = LST_NULL;
@@ -103,11 +106,25 @@ void setUpLists(struct ListPool* pool, struct ForwardList* list, struct PlanPool
 
 
 
-void deletePlan(struct ForwardList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t prevNode) {
-    node_index_t currentNode = listPool->nodes[prevNode].next;
-    assert(currentNode != LST_NULL && currentNode != LST_INACTIVE);
-    listPool->nodes[prevNode].next = listPool->nodes[currentNode].next;
-    listPool->nodes[currentNode].next = LST_INACTIVE;
+void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode) {
+    node_index_t prev = listPool->nodes[currentNode].prev;
+    node_index_t next = listPool->nodes[currentNode].next;
+
+    listPool->nodes[currentNode].prev = listPool->nodes[currentNode].next = LST_INACTIVE;
+
+    if (prev == LST_NULL && next == LST_NULL){
+        list->starting = list->ending = LST_INACTIVE;
+    } else if (prev == LST_NULL){
+        list->starting = next;
+        listPool->nodes[next].prev = prev;
+    } else if (next == LST_NULL){
+        list->ending = prev;
+        listPool->nodes[prev].next = next;
+    } else {
+        listPool->nodes[next].prev = prev;
+        listPool->nodes[prev].next = next;
+    }
+
 }
 
 int initCheckPlan(struct Storage *storage, plan_index_t planIndex){
@@ -185,19 +202,17 @@ struct Storage *getFromInput() {
     scanf("%zu%zu", &n, &m);
 
     int fd = shm_open(STORAGE, O_CREAT | O_RDWR, S_IWUSR | S_IRUSR);
-    if (fd == -1) {
-        syserr("shm_open fail");
-    }
+    SYSTEM2(fd == -1, "shm_open fail");
     if (ftruncate(fd, sizeof(struct Storage)) == -1) {
         shm_unlink(STORAGE);
-        syserr("ftruncate fail");
+        SYSTEM2(1, "ftruncate fail");
     }
     struct Storage *storage =
             mmap(NULL, sizeof(struct Storage), PROT_READ | PROT_WRITE,
                  MAP_SHARED, fd, 0);
     if (storage == MAP_FAILED) {
         shm_unlink(STORAGE);
-        syserr("Mapping fail");
+        SYSTEM2(1, "Mapping fail");
     }
 
     storage->playerCount = n;
@@ -225,6 +240,7 @@ struct Storage *getFromInput() {
     }
     for (size_t i = 1; i <= n; i++){
         storage->freePlayer[i] = 1;
+        storage->currentGameByPlayer[i] = -1;
     }
     printf("OK\n");
     qsort(storage->rooms, m, sizeof(struct Room), compRooms);
@@ -236,7 +252,7 @@ struct Storage *getFromInput() {
         sprintf(filename, "player-%zu.in", i);
 
         int ithFd = open(filename, O_RDONLY);
-        if (ithFd < 0) syserr("Bad read");
+        SYSTEM2(ithFd < 0, "Bad read");
         char a; read(ithFd, &a, 1);
         printf("Player %zu has %c type\n", i, a);
         storage->playerPrefdRoom[i] = a;
@@ -251,8 +267,8 @@ struct Storage *getFromInput() {
 
 int initSems(struct Storage const *storage, struct Semaphores* semaphores){ // Unix semaphores
     int sem_protection = semget(SEM_PROTECTION, 1, IPC_CREAT | 0600);
-    int sems_entry = semget(SEMS_ENTRY, (int) storage->playerCount, IPC_CREAT | 0600);
-    int sems_exit = semget(SEMS_EXIT, (int) storage->playerCount, IPC_CREAT | 0600);
+    int sems_entry = semget(SEMS_ENTRY, (int) storage->playerCount + 1, IPC_CREAT | 0600);
+    int sems_exit = semget(SEMS_EXIT, (int) storage->playerCount + 1, IPC_CREAT | 0600);
     if (sem_protection == -1 || sems_entry == -1 || sems_exit == -1) return -1;
     if (semctl(sem_protection, 0, SETVAL, 0) == -1){
         return -2;
@@ -297,7 +313,7 @@ int main() {
             case -1:
                 munmap(storage, sizeof(struct Storage));
                 shm_unlink(STORAGE);
-                syserr("fork");
+                SYSTEM2(1, "fork");
             case 0: // child process
                 player(i);
                 munmap(storage, sizeof(struct Storage));
@@ -308,7 +324,7 @@ int main() {
     }
     printf("OK\n");
     for (size_t i = 1; i <= n; i++) {
-        wait(0);
+        SYSTEM2(wait(0) == -1, "wait");
     }
 
     munmap(storage, sizeof(struct Storage));

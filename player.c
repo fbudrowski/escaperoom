@@ -1,16 +1,10 @@
 #include <semaphore.h>
-#include <time.h>
 #include <unistd.h>
-#include <string.h>
 #include <stdio.h>
 #include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/stat.h>        /* For mode constants */
 #include <fcntl.h>           /* For O_* constants */
-#include <sys/ipc.h>
 #include <sys/sem.h>
 #include <stdbool.h>
 #include "err.h"
@@ -19,6 +13,7 @@
 
 
 void player(size_t id){
+    srand(id * 114 + 413243);
 
     int storageDesc = shm_open(STORAGE, O_RDWR, S_IRUSR | S_IWUSR);
     struct Storage* storage = mmap(NULL, sizeof(struct Storage), PROT_READ | PROT_WRITE, MAP_SHARED, storageDesc, 0);
@@ -32,9 +27,9 @@ void player(size_t id){
     sprintf(outputFilename, "player-%zu.out", id);
 
     int inputFd = open(inputFilename, O_RDONLY);
-    if (inputFd < 0) syserr("Input open failed");
+    SYSTEM2(inputFd < 0, "Input open failed");
     int outputFd = open(outputFilename, O_RDWR);
-    if (outputFd < 0) syserr("Output open failed");
+    SYSTEM2(outputFd < 0, "Output open failed");
 
     printf("Opened files %s (%d), %s (%d)\n", inputFilename, inputFd, outputFilename, outputFd);
 
@@ -60,50 +55,107 @@ void player(size_t id){
      *    4) See if this plan can go.
      *    5) Give protection.
      */
-    struct sembuf sbuf;
+    struct sembuf sbuf_protection;
 
     while(1){
 
-        sbuf.sem_num = 0;
-        sbuf.sem_op = -1;
-        sbuf.sem_flg = 0;
+        sbuf_protection.sem_num = 0;
+        sbuf_protection.sem_op = -1;
+        sbuf_protection.sem_flg = 0;
 
-        if (semop(semaphores.protection, &sbuf, 1) == -1){
-            syserr("semaphore");
-        }
+        SYSTEM2(semop(semaphores.protection, &sbuf_protection, 1) == -1, "semaphore"); // Get protection
 
         //TODO: Check if id will ever be needed.
         if (id == -1) break;
 
 
-        if (semctl(semaphores.entry, (int)id, GETVAL) > 0){
+        if (storage->currentGameByPlayer[id] > -1){ // If anyone is waiting for current player to play
             struct Plan* plan = &storage->planPool.plans[storage->currentGameByPlayer[id]];
+            struct Room* room = &storage->rooms[plan->assignedRoomNewId];
             size_t currentIterator = plan->elements.starting;
             struct ListNode* currentPlayer = &storage->listPool.nodes[currentIterator];
-            printf("Entered room %d, game defined by %zu, waiting for players (", plan->assignedRoomNewId, currentPlayer->value);
+            char printout[120];
+            sprintf(printout, "Entered room %d, game defined by %zu, waiting for players (", plan->assignedRoomNewId, currentPlayer->value);
             bool isFirst = true;
             while(currentIterator != LST_NULL && currentIterator != LST_INACTIVE){
                 currentPlayer = &storage->listPool.nodes[currentIterator];
-                if (semctl(semaphores.entry, (int)currentPlayer->value, GETVAL) > 0){
+                int result = semctl(semaphores.entry, (int)currentPlayer->value, GETVAL);
+                SYSTEM2(result < 0, "semaphore");
+                if (result > 0){ // if it is not yet waiting
                     if (!isFirst){
-                        printf(", ");
+                        sprintf(printout, ", ");
                     }
                     isFirst = false;
-                    printf("%zu", currentPlayer->value);
+                    sprintf(printout, "%zu", currentPlayer->value);
                 }
                 currentIterator = currentPlayer->next;
             }
-            printf(")\n");
+            sprintf(printout, ")\n");
+            SYSTEM2(write(outputFd, printout, sizeof(printout)), "write2");
 
-            semop(semaphores.entry, ())
+
+            sbuf_protection.sem_num = 0;
+            sbuf_protection.sem_flg = 0;
+
+            struct sembuf sbuf_entry;
+
+            ++room->taken;
+
+            if (room->taken == plan->elem_count){ // If I'm the last one
+                sbuf_entry.sem_op = 1;
+                sbuf_entry.sem_flg = 0;
+
+                size_t element = plan->elements.starting;                   // Allows all others to enter the game
+                while(element != LST_INACTIVE && element != LST_NULL){
+
+                    sbuf_entry.sem_num = (unsigned short) element;
+                    SYSTEM2(semop(semaphores.entry, &sbuf_entry, storage->playerCount + 1) == -1, "semaphore");
+
+                    element = storage->listPool.nodes[element].next;
+                }
+
+
+                sbuf_protection.sem_op = 1;
+                SYSTEM2(semop(semaphores.protection, &sbuf_protection, 1) == -1, "semaphore");// Give protection
+            }
+            else {
+                sbuf_protection.sem_op = 1;
+                SYSTEM2(semop(semaphores.protection, &sbuf_protection, 1) == -1, "semaphore");// Give protection
+
+                sbuf_entry.sem_num = id;
+                sbuf_entry.sem_op = -1;
+                sbuf_entry.sem_flg = 0;
+                SYSTEM2(semop(semaphores.entry, &sbuf_entry, storage->playerCount + 1) != -1, "semaphore"); // Wait until allowed to enter
+            }
+            SYSTEM(sleep(rand() % 10)); //Play
+
+            sbuf_protection.sem_op = -1;
+            SYSTEM2(semop(semaphores.protection, &sbuf_protection, 1) == -1, "semaphore");// Get protection
+
+
+            --room->taken;
+            storage->freePlayer[id] = 1;
+            int planId = storage->currentGameByPlayer[id];
+            storage->currentGameByPlayer[id] = -1; // Get out
+
+            --storage->remainingPlayersForTypes[storage->playerPrefdRoom[id] - SMALLEST_ROOM];
+            if (room->taken == 0){ // If we're the last to leave, clean up
+                if (room->capacity > storage->biggestFreeRoom[room->type - SMALLEST_ROOM]){
+                    storage->biggestFreeRoom[room->type - SMALLEST_ROOM] = (int)room->capacity;
+                }
+                listClear(&plan->elements, &storage->listPool);
+                deletePlan(&storage->listOfPlans, &storage->listPool, &storage->planPool, (int)planId);
+
+            }
+            sbuf_protection.sem_op = 1;
+            SYSTEM2(semop(semaphores.protection, &sbuf_protection, 1) == -1, "semaphore");// Give protection
+            continue;
+        }
+        else{ // Read the plan
 
         }
 
-
-
-
-
-            close(inputFd);
     }
+    close(inputFd);
     close(outputFd);
 }
