@@ -107,6 +107,8 @@ void setUpLists(struct ListPool* pool, struct LinkedList* list, struct PlanPool*
 
 
 void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode) {
+    listClear(&planPool->plans[currentNode].elements, listPool);
+
     node_index_t prev = listPool->nodes[currentNode].prev;
     node_index_t next = listPool->nodes[currentNode].next;
 
@@ -315,8 +317,8 @@ int main() {
                 shm_unlink(STORAGE);
                 SYSTEM2(1, "fork");
             case 0: // child process
-                player(i);
                 munmap(storage, sizeof(struct Storage));
+                player(i);
                 return 0;
             default:
                 continue;
@@ -324,7 +326,7 @@ int main() {
     }
     printf("OK\n");
     for (size_t i = 1; i <= n; i++) {
-        SYSTEM2(wait(0) == -1, "wait");
+        SYSTEM2(wait(0) == -1, "wait"); // TODO: zwalniac zasoby
     }
 
     munmap(storage, sizeof(struct Storage));

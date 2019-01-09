@@ -72,7 +72,8 @@ int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value);
 void listClear(struct LinkedList *list, struct ListPool *pool);
 plan_index_t addNewPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool);
 void setUpLists(struct ListPool *pool, struct LinkedList *list, struct PlanPool *planPool);
-void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode);
+void
+deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode);
 
 
 struct Storage {
@@ -104,10 +105,10 @@ struct Storage *getFromInput();
 #define SEMS_ENTRY 5555
 #define SEMS_EXIT 6666
 
-struct Semaphores{
+struct Semaphores {
     int protection;
     int entry;
     int exit;
 };
-int initSems(struct Storage const * storage, struct Semaphores* semaphores);
-int getSems(struct Storage const * storage, struct Semaphores* semaphores);
+int initSems(struct Storage const *storage, struct Semaphores *semaphores);
+int getSems(struct Storage const *storage, struct Semaphores *semaphores);
