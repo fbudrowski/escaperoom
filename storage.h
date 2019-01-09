@@ -1,8 +1,18 @@
+#include <semaphore.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <sys/mman.h>
+#include <stdlib.h>
+#include <sys/stat.h>        /* For mode constants */
+#include <fcntl.h>           /* For O_* constants */
+#include <sys/sem.h>
+#include <stdbool.h>
+#include "err.h"
+
 
 #ifndef ESCAPEROOM_STORAGE_H
 #define ESCAPEROOM_STORAGE_H
 
-#endif //ESCAPEROOM_STORAGE_H
 
 #define MAX_PLAYERS 1026
 #define COLOR_ZERO (MAX_PLAYERS + 100)
@@ -112,3 +122,6 @@ struct Semaphores {
 };
 int initSems(struct Storage const *storage, struct Semaphores *semaphores);
 int getSems(struct Storage const *storage, struct Semaphores *semaphores);
+
+
+#endif //ESCAPEROOM_STORAGE_H

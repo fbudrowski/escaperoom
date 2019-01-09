@@ -165,6 +165,7 @@ void player(size_t id){
             continue;
         }
         else{ // Read the plan
+            printf("Player %zu reads the plan", id);
             char *planString = fgets(allPlansString, 4 * MAX_PLAYERS, input);
             if (planString == NULL){
                 break;
@@ -221,6 +222,7 @@ void startGame(struct Storage *storage, struct Semaphores* semaphores, struct Pl
             storage->biggestFreeRoom[storage->rooms[i].type - SMALLEST_ROOM] = (int)storage->rooms[i].capacity;
         }
     }
+
 
 
     while(elemIterator != LST_INACTIVE && elemIterator != LST_NULL){

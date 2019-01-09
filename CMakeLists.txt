@@ -6,7 +6,7 @@ set(CMAKE_C_FLAGS "-g -Wall")
 
 
 
-add_executable(manager manager.c player.c storage.h)
+add_executable(manager manager.c player.c storage.c)
 target_link_libraries(manager rt pthread)
-add_executable(player player.c storage.h)
+add_executable(player player.c storage.c)
 target_link_libraries(manager rt pthread)
