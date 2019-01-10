@@ -10,119 +10,265 @@
 #include "err.h"
 #include "storage.h"
 
+void playGameLogEntryStatus(struct Storage *storage, struct Plan *plan, struct Room *room, size_t playerId,
+                            FILE *output);
+void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId);
+void tryStartingAnyGame(size_t playerId, struct Storage *storage);
 
-void startGame(struct Storage *storage, struct Semaphores *semaphores, struct Plan *plan, plan_index_t planId);
 
-void playGame(size_t id, struct Storage* storage, struct Semaphores* semaphores, FILE* output){
-    struct sembuf sbuf_protection;
-    sbuf_protection.sem_num = 0;
-    sbuf_protection.sem_flg = 0;
-
-    struct Plan* plan = &storage->planPool.plans[storage->currentGameByPlayer[id]];
-    struct Room* room = &storage->rooms[plan->assignedRoomNewId];
+void playGameLogEntryStatus(struct Storage *storage, struct Plan *plan, struct Room *room, size_t playerId,
+                            FILE *output){
     size_t currentIterator = plan->elements.starting;
-    struct ListNode* currentPlayer = &storage->listPool.nodes[currentIterator];
     char printout[120];
-    sprintf(printout, "Entered room %d, game defined by %zu, waiting for players (", plan->assignedRoomNewId, currentPlayer->value);
-    bool isFirst = true;
-    while(currentIterator != LST_NULL && currentIterator != LST_INACTIVE){
-        currentPlayer = &storage->listPool.nodes[currentIterator];
-        int result = semctl(semaphores->entry, (int)currentPlayer->value, GETVAL);
-        SYSTEM2(result < 0, "semaphore");
-        if (result > 0){ // if it is not yet waiting
-            if (!isFirst){
-                sprintf(printout, ", ");
+
+    { // Writing stuff
+        struct ListNode* currentPlayer = &storage->listPool.nodes[currentIterator];
+        int move = sprintf(printout, "Entered room %d, game defined by %d, waiting for players (", room->roomOriginalId, plan->author);
+        bool isFirst = true;
+        while(currentIterator != LST_NULL && currentIterator != LST_INACTIVE) { // For each player write stuff
+            currentPlayer = &storage->listPool.nodes[currentIterator];
+
+            if (storage->playerEnteredRoom[currentPlayer->value] == 0) { // if it is not yet waiting
+                if (!isFirst) {
+                    move += sprintf(printout + move, ", ");
+                }
+                isFirst = false;
+                move += sprintf(printout + move, "%zu", currentPlayer->value);
             }
-            isFirst = false;
-            sprintf(printout, "%zu", currentPlayer->value);
+            currentIterator = currentPlayer->next;
         }
-        currentIterator = currentPlayer->next;
+        move += sprintf(printout + move, ")\n");
+        DEBUG("(%zu): %s\n", playerId, printout);
+        SYSTEM2(fprintf(output, "%s", printout) == -1, "write2");
     }
-    sprintf(printout, ")\n");
-    SYSTEM2(fprintf(output, "%s", printout) == -1, "write2");
+
+};
+
+void playGame(size_t playerId, struct Storage* storage, FILE* output){
+
+    SYSTEM2(sem_wait(&storage->protection), "protection-");
+
+    struct Plan* plan = &storage->planPool.plans[storage->currentGameByPlayer[playerId]];
+    struct Room* room = &storage->rooms[plan->assignedRoomNewId];
+
+    storage->playerEnteredRoom[playerId] = 1;
+    playGameLogEntryStatus(storage,plan,room,playerId,output);
 
 
-    struct sembuf sbuf_entry;
 
-    ++room->taken;
 
-    if (room->taken == plan->elem_count){ // If I'm the last one
-        sbuf_entry.sem_op = 1;
-        sbuf_entry.sem_flg = 0;
+    ++room->inside;
+    DEBUG("Game room entered by %zu with %d out of %d ppl inside\n", playerId, room->inside, plan->elem_count);
 
+    if (room->inside == plan->elem_count){ // If I'm the last one
         size_t element = plan->elements.starting;                   // Allows all others to enter the game
         while(element != LST_INACTIVE && element != LST_NULL){
-
-            sbuf_entry.sem_num = (unsigned short) element;
-            SYSTEM2(semop(semaphores->entry, &sbuf_entry, storage->playerCount + 1) == -1, "semaphore");
-
+            size_t localPlayer = storage->listPool.nodes[element].value;
+            DEBUG("Player %zu invites player %zu to play the game in %d\n", playerId, localPlayer, plan->assignedRoomNewId);
+            if (localPlayer != playerId){
+                SYSTEM2(sem_post(&storage->entry[localPlayer]) < 0, "entry semaphore+"); // Allow this one to enter
+            }
             element = storage->listPool.nodes[element].next;
         }
 
-
-        sbuf_protection.sem_op = 1;
-        SYSTEM2(semop(semaphores->protection, &sbuf_protection, 1) == -1, "semaphore");// Give protection
+        SYSTEM2(sem_post(&storage->protection) < 0, "protection+");// Give protection
     }
     else {
-        sbuf_protection.sem_op = 1;
-        SYSTEM2(semop(semaphores->protection, &sbuf_protection, 1) == -1, "semaphore");// Give protection
-
-        sbuf_entry.sem_num = id;
-        sbuf_entry.sem_op = -1;
-        sbuf_entry.sem_flg = 0;
-        SYSTEM2(semop(semaphores->entry, &sbuf_entry, storage->playerCount + 1) != -1, "semaphore"); // Wait until allowed to enter
+        SYSTEM2(sem_post(&storage->protection) < 0, "protection+");// Give protection
+        SYSTEM2(sem_wait(&storage->entry[playerId]) < 0, "entry semaphore-"); // Wait until allowed to enter
     }
-    SYSTEM(sleep(rand() % 10)); //Play
-
-    sbuf_protection.sem_op = -1;
-    SYSTEM2(semop(semaphores->protection, &sbuf_protection, 1) == -1, "semaphore");// Get protection
+    DEBUG("Player %zu enters game in room %d\n", playerId, plan->assignedRoomNewId);
 
 
-    --room->taken;
-    storage->freePlayer[id] = 1;
-    int planId = storage->currentGameByPlayer[id];
-    storage->currentGameByPlayer[id] = -1; // Get out
+    SYSTEM(sleep(rand() % 3)); //Play
 
-    --storage->remainingPlayersForTypes[storage->playerPrefdRoom[id] - SMALLEST_ROOM];
-    if (room->taken == 0){ // If we're the last to leave, clean up
-        if (room->capacity > storage->biggestFreeRoom[room->type - SMALLEST_ROOM]){
+
+
+    DEBUG("Player %zu exits game in room %d\n", playerId, plan->assignedRoomNewId);
+    SYSTEM2(sem_wait(&storage->protection) < 0, "protection-"); // Get protection
+    --room->inside;
+    storage->freePlayer[playerId] = 1;
+    int planId = storage->currentGameByPlayer[playerId];
+    storage->currentGameByPlayer[playerId] = -1; // Get out
+    storage->playerEnteredRoom[playerId] = 0;
+    SYSTEM2(fprintf(output, "Left room %d\n", room->roomOriginalId) <= 0, "fprintf3");
+
+    ++storage->remainingPlayersForTypes[getType(playerId, storage)];
+    storage->playerInPlans[playerId]--;
+
+
+//    if (storage->alreadyFinishedWriting == storage->playerCount
+//        && storage->playerTypeInPlans[getType(playerId, storage)] == 0){
+//        for (int i = 1; i <= storage->playerCount; ++i){
+//            if (getType(playerId, storage) == getType((size_t) i, storage) && storage->playerInPlans[i] == 0){
+//                SYSTEM2(sem_post(&storage->isToEnter[i]), "isToEnter+");
+//            }
+//        }
+//    }
+
+
+    DEBUG("Leaving %zu, plan %d\n", playerId, planId);
+    if (room->inside == 0){ // If we're the last to leave, clean up
+
+        DEBUG("Clean up %zu, plan %d, room %zu, %c\n", playerId, planId, room->capacity, room->type);
+
+        room->taken = 0;
+        if ((int)room->capacity > storage->biggestFreeRoom[room->type - SMALLEST_ROOM]){ // Update biggestFreeRoom
             storage->biggestFreeRoom[room->type - SMALLEST_ROOM] = (int)room->capacity;
         }
+
         listClear(&plan->elements, &storage->listPool);
         deletePlan(&storage->listOfPlans, &storage->listPool, &storage->planPool, (node_index_t) planId);
 
+        DEBUG("Player %zu tries to start any game\n", playerId);
+
+        tryStartingAnyGame(playerId, storage);
     }
-    sbuf_protection.sem_op = 1;
-    SYSTEM2(semop(semaphores->protection, &sbuf_protection, 1) == -1, "semaphore");// Give protection
+    SYSTEM2(sem_post(&storage->protection) < 0, "protection+");// Give protection
 }
 
 
+void readPlan(size_t playerId, struct Storage *storage, const char *planString, FILE* output) {
+    DEBUG("Player %zu reads the plan: %s\n", playerId, planString);
+    plan_index_t planId = addNewEmptyPlan(&storage->listOfPlans, &storage->listPool, &storage->planPool);
+    struct Plan *plan = &storage->planPool.plans[planId];
+    int pos = 0;
+    sscanf(planString + pos, "%c %n", &plan->room_type, &pos);
+    char local[7];
+    int change = 0;
 
-void player(size_t id){
+    plan->author = playerId;
+
+
+    while (sscanf(planString + pos, "%s%n", local, &change) > 0) {
+        ++plan->elem_count;
+        DEBUG("Plan Elem Count increase %d\n", plan->elem_count);
+        pos += change;
+        if ('A' <= local[0] && local[0] <= 'Z') {
+            listAppend(&plan->elements, &storage->listPool, (size_t) local[0] + COLOR_ZERO - SMALLEST_ROOM);
+        } else {
+            long int val = strtol(local, NULL, 10);
+            listAppend(&plan->elements, &storage->listPool, (size_t) val);
+        }
+    }
+    int ok = initCheckPlan(storage, planId);
+    DEBUG("Plan with status %d (size %d)\n", ok, plan->elem_count);
+    if (ok < 0) {
+        fprintf(output, "Invalid plan: \"%s\"", planString);
+        deletePlan(&storage->listOfPlans, &storage->listPool, &storage->planPool, planId);
+    } else{
+        DEBUG("Plan to check\n"); fflush(stdout);
+        ok = checkPlan(storage, planId);
+        DEBUG("Plan to go (%d)\n", ok); fflush(stdout);
+        if (ok >= 0) {
+            startGame(storage, plan, planId);
+            DEBUG("Game started\n"); fflush(stdout);
+        }
+
+    }
+
+}
+
+void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId) {
+
+
+    struct Room* room = NULL;
+    bool roomSelected = false;
+    for (size_t i = 0; i < ROOM_TYPES_COUNT; i++) {
+        storage->biggestFreeRoom[i] = -1;
+    }
+    DEBUG("One out of %zu rooms will be selected for game %zu\n", storage->roomCount, planId);
+    for (size_t i = 0; i < storage->roomCount; i++){ // Getting a room
+//        DEBUG("Room %zu\n", i);
+        if (storage->rooms[i].taken == 0 && !roomSelected && storage->rooms[i].type == plan->room_type
+            && storage->rooms[i].capacity >= plan->elem_count){
+            room = &storage->rooms[i];
+            plan->assignedRoomNewId = (int) i;
+            roomSelected = true;
+            room->taken = 1;
+        } else if (storage->rooms[i].inside == 0 ){
+            storage->biggestFreeRoom[storage->rooms[i].type - SMALLEST_ROOM] = (int)storage->rooms[i].capacity;
+        }
+    }
+    DEBUG("Game %zu assigned room %d\n", planId, plan->assignedRoomNewId);
+    int playersOfType[ROOM_TYPES_COUNT];
+    for (int i = 0; i < ROOM_TYPES_COUNT; i++){
+        playersOfType[i] = 0;
+    }
+
+    node_index_t elemIterator = plan->elements.starting;
+    while(elemIterator != LST_INACTIVE && elemIterator != LST_NULL){ // Getting all named players to go
+        size_t val = storage->listPool.nodes[elemIterator].value;
+        DEBUG("Elem %zu (COL0 = %d);\n",val, COLOR_ZERO);
+        if (val < MAX_PLAYERS){
+            storage->freePlayer[val] = 0;
+            storage->currentGameByPlayer[val] = (int) planId;
+            storage->playerInPlans[val]--;
+            storage->playerTypeInPlans[storage->playerPrefdRoom[val] - SMALLEST_ROOM]++;
+            // Raise semaphore
+            DEBUG("Element %zu is to enter\n", val);
+            storage->playerEnteredRoom[val] = 0;
+            SYSTEM2(sem_post(&storage->isToEnter[val]), "isToEnter+");
+        } else{
+            ++playersOfType[val - COLOR_ZERO];
+        }
+        elemIterator = storage->listPool.nodes[elemIterator].next;
+    }
+
+    elemIterator = plan->elements.starting;
+
+    for(size_t i = 1; i <= storage->playerCount; i++){
+        if (storage->freePlayer[i] && playersOfType[storage->playerPrefdRoom[i] - SMALLEST_ROOM] > 0){
+            playersOfType[storage->playerPrefdRoom[i] - SMALLEST_ROOM]--;
+            storage->freePlayer[i]--;
+            storage->currentGameByPlayer[i] = (int)planId;
+            while (storage->listPool.nodes[elemIterator].value < COLOR_ZERO){
+                elemIterator = storage->listPool.nodes[elemIterator].next;
+            }
+            storage->listPool.nodes[elemIterator].value = i;
+            DEBUG("Element %zu is to enter (2)\n", i);
+            storage->playerEnteredRoom[i] = 0;
+            SYSTEM2(sem_post(&storage->isToEnter[i]), "isToEnter+");// Raise semaphore
+        }
+    }
+
+}
+
+void tryStartingAnyGame(size_t playerId, struct Storage *storage) { // MUST be called WITH protection
+    node_index_t currentPlanNode = storage->listOfPlans.starting;
+    while (currentPlanNode != LST_NULL && currentPlanNode != LST_INACTIVE) {
+        plan_index_t planId = storage->listPool.nodes[currentPlanNode].value;
+        struct Plan* plan = &storage->planPool.plans[planId];
+        int ok = checkPlan(storage, planId);
+        printf("Player %zu checks plan %zu with %d\n", playerId, planId, ok);
+        if (ok >= 0){
+            startGame(storage, plan, planId);
+            return;
+        }
+        currentPlanNode = storage->listPool.nodes[currentPlanNode].next;
+    }
+}
+
+void player(size_t playerId){
     char allPlansString[4 * MAX_PLAYERS];
-    srand(id * 114 + 413243);
+    srand(playerId * 114 + 413243);
 
     int storageDesc = shm_open(STORAGE, O_RDWR, S_IRUSR | S_IWUSR);
     struct Storage* storage = mmap(NULL, sizeof(struct Storage), PROT_READ | PROT_WRITE, MAP_SHARED, storageDesc, 0);
-    struct Semaphores semaphores;
-    getSems(storage, &semaphores);
 
-    printf("Player %zu\n", id);
+    DEBUG("Player %zu\n", playerId);
     char inputFilename[20];
-    sprintf(inputFilename, "player-%zu.in", id);
+    sprintf(inputFilename, "player-%zu.in", playerId);
     char outputFilename[20];
-    sprintf(outputFilename, "player-%zu.out", id);
+    sprintf(outputFilename, "player-%zu.out", playerId);
 
-//    int inputFd = open(inputFilename, O_RDONLY);
-//    SYSTEM2(inputFd < 0, "Input open failed");
-//    int outputFd = open(outputFilename, O_RDWR);
-//    SYSTEM2(outputFd < 0, "Output open failed");
     FILE* input = fopen(inputFilename, "r");
     SYSTEM2(input == NULL, "input file");
     FILE* output= fopen(outputFilename, "w");
     SYSTEM2(input == NULL, "output file");
 
-//    printf("Opened files %s (%d), %s (%d)\n", inputFilename, inputFd, outputFilename, outputFd);
+    char playerType[10];
+    fgets(playerType, 10, input);
 
 
     /* getOut procedure:
@@ -146,93 +292,91 @@ void player(size_t id){
      *    4) See if this plan can go.
      *    5) Give protection.
      */
-    struct sembuf sbuf_protection;
+    printf("Player %zu waits to enter\n", playerId);
+
+    SYSTEM2(sem_wait(&storage->protection), "protection-");// Get protection
+
+    printf("Player %zu enters\n", playerId);
+    ++storage->remainingPlayersForTypes[storage->playerPrefdRoom[playerId] - SMALLEST_ROOM];
+
+    tryStartingAnyGame(playerId, storage);
+
+
+    SYSTEM2(sem_post(&storage->protection), "protection+");// Give protection
+
+
 
     while(1){
 
-        sbuf_protection.sem_num = 0;
-        sbuf_protection.sem_op = -1;
-        sbuf_protection.sem_flg = 0;
+        SYSTEM2(sem_wait(&storage->protection), "protection-");// Get protection
 
-        SYSTEM2(semop(semaphores.protection, &sbuf_protection, 1) == -1, "semaphore"); // Get protection
+        if (storage->currentGameByPlayer[playerId] > -1){ // If anyone is waiting for current player to play
+            SYSTEM2(sem_post(&storage->protection), "protection+");
+            DEBUG("(in)Player %zu waits to enter the game %d\n", playerId, storage->currentGameByPlayer[playerId]);
+            SYSTEM2(sem_wait(&storage->isToEnter[playerId]) < 0, "isToEnter-"); // Notice that he enters
+            DEBUG("Player %zu enters the game %d\n", playerId, storage->currentGameByPlayer[playerId]);
 
-        //TODO: Check if id will ever be needed.
-        if (id == -1) break;
-
-
-        if (storage->currentGameByPlayer[id] > -1){ // If anyone is waiting for current player to play
-            playGame(id, storage, &semaphores, output);
+            playGame(playerId, storage, output);
             continue;
         }
         else{ // Read the plan
-            printf("Player %zu reads the plan", id);
             char *planString = fgets(allPlansString, 4 * MAX_PLAYERS, input);
             if (planString == NULL){
+                SYSTEM2(sem_post(&storage->protection), "protection+");// Give protection
                 break;
             }
-            plan_index_t planId = addNewPlan(&storage->listOfPlans, &storage->listPool, &storage->planPool);
-            struct Plan* plan = &storage->planPool.plans[planId];
-            int pos = 0;
-            sscanf(planString + pos, "%c %n", &plan->room_type, &pos);
-            char local[7];
-            int change = 0;
-            while(sscanf(planString + pos, "%s%n", local, &change) > 0){
-                ++plan->elem_count;
-                pos += change;
-                if ('A' <= local[0] && local[0] <= 'Z'){
-                    listAppend(&plan->elements, &storage->listPool, (size_t)local[0] + COLOR_ZERO - SMALLEST_ROOM);
-                } else{
-                    long int val = strtol(local, NULL, 10);
-                    listAppend(&plan->elements, &storage->listPool, (size_t)val);
-                }
+            readPlan(playerId, storage, planString, output);
+            SYSTEM2(sem_post(&storage->protection), "protection+"); // Give protection
+            puts("Plan read");
+        }
+    }
+    DEBUG("Player %zu exited the loop\n", playerId);
+    ++storage->alreadyFinishedWriting;
+    if (storage->alreadyFinishedWriting == storage->playerCount){
+        DEBUG("Everything read\n");
+        for (int i = 1; i <= storage->playerCount; i++){
+            if (storage->playerInPlans[i] == 0
+               && storage->playerTypeInPlans[storage->playerPrefdRoom[i] - SMALLEST_ROOM] == 0){
+                SYSTEM2(sem_post(&storage->isToEnter[i]), "isToEnter+");
             }
-            int ok = initCheckPlan(storage, planId);
-            if (ok < 0){
-                deletePlan(&storage->listOfPlans, &storage->listPool, &storage->planPool, planId);
-            }
-
-            ok = checkPlan(storage, planId);
-            if (ok >= 0){
-                startGame(storage, &semaphores, plan, planId);
-            }
-
-
         }
 
+        for(int i = 0; i < storage->playerCount; i++){
+            SYSTEM2(sem_post(&storage->forLastToExit) < 0, "forLastToExit");
+        }
     }
+
+    int v;
+    sem_getvalue(&storage->protection, &v);
+    DEBUG("%zu:: %d\n",playerId, v);
+
+    while(1){
+        DEBUG("(out)Player %zu waits to enter the game\n", playerId);
+        SYSTEM2(sem_wait(&storage->isToEnter[playerId]) < 0, "isToEnter-"); // Notice that he enters
+        DEBUG("Player %zu waits for protection\n", playerId);
+        SYSTEM2(sem_wait(&storage->protection) < 0, "protection-");
+
+
+        if (// If this player is no longer needed
+            storage->playerInPlans[playerId] == 0 &&
+            storage->playerTypeInPlans[storage->playerPrefdRoom[playerId] - SMALLEST_ROOM] == 0){
+            DEBUG("Player %zu wants to exit\n", playerId);
+            if (storage->alreadyFinishedWriting == storage->playerCount){
+                SYSTEM2(sem_post(&storage->protection) < 0, "protection+");
+                break;
+            }
+            else{
+                SYSTEM2(sem_post(&storage->protection) < 0, "protection+");
+                continue;
+            }
+        }
+
+        DEBUG("Player %zu enters the game %d\n", playerId, storage->currentGameByPlayer[playerId]);
+        playGame(playerId, storage, output); // returns protection
+    }
+
+    DEBUG("\t\tPlayer %zu EXITS\n", playerId);
     fclose(input);
     fclose(output);
-}
-
-void startGame(struct Storage *storage, struct Semaphores* semaphores, struct Plan *plan, plan_index_t planId) {
-
-    node_index_t elemIterator = plan->elements.starting;
-
-    struct Room* room = NULL;
-    bool roomSelected = false;
-    for (size_t i = 0; i < ROOM_TYPES_COUNT; i++) {
-        storage->biggestFreeRoom[i] = -1;
-    }
-    for (size_t i = 0; i <= storage->roomCount; i++){
-        if (storage->rooms[i].taken == 0 && !roomSelected && storage->rooms[i].type == plan->room_type
-            && storage->rooms[i].capacity >= plan->elem_count){
-            room = &storage->rooms[i];
-            roomSelected = true;
-        } else if (storage->rooms[i].taken == 0 ){
-            storage->biggestFreeRoom[storage->rooms[i].type - SMALLEST_ROOM] = (int)storage->rooms[i].capacity;
-        }
-    }
-
-
-
-    while(elemIterator != LST_INACTIVE && elemIterator != LST_NULL){
-        size_t val = storage->listPool.nodes[elemIterator].value;
-        if (val < MAX_PLAYERS){
-            storage->freePlayer[val] = 0;
-            storage->currentGameByPlayer[val] = planId;
-            // Raise semaphore
-        }
-        elemIterator = storage->listPool.nodes[elemIterator].next;
-    }
 }
 

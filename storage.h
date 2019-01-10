@@ -31,10 +31,11 @@
 
 #define PLAN_INACTIVE 0
 #define PLAN_NULL (MAX_PLANS + 2)
-#define PLAN_PRESTART (MAX_LIST_ELEMS + 3)
+#define PLAN_PRESTART (3)
 
 
-void player(size_t id);
+
+void player(size_t playerId);
 
 typedef size_t plan_index_t;
 typedef size_t node_index_t;
@@ -42,6 +43,7 @@ typedef size_t node_index_t;
 struct Room {
     char type;
     size_t capacity;
+    int inside;
     int taken;
     int roomOriginalId;
 };
@@ -69,6 +71,7 @@ struct Plan {
     int assignedRoomNewId;
     char room_type;
     int elem_count;
+    int author;
     struct LinkedList elements;
 };
 
@@ -80,10 +83,9 @@ struct PlanPool {
 plan_index_t getEmptyPlan(struct PlanPool *planPool);
 int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value);
 void listClear(struct LinkedList *list, struct ListPool *pool);
-plan_index_t addNewPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool);
+plan_index_t addNewEmptyPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool);
 void setUpLists(struct ListPool *pool, struct LinkedList *list, struct PlanPool *planPool);
-void
-deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode);
+void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode);
 
 
 struct Storage {
@@ -92,9 +94,13 @@ struct Storage {
     int freePlayer[MAX_PLAYERS];
     char playerPrefdRoom[MAX_PLAYERS];
     int currentGameByPlayer[MAX_PLAYERS];
+    int playerEnteredRoom[MAX_PLAYERS];
+    int playerInPlans[MAX_PLAYERS];
+    int playerTypeInPlans[ROOM_TYPES_COUNT];
 
     size_t playerCount;
     size_t roomCount;
+    size_t alreadyFinishedWriting;
     struct Room rooms[MAX_ROOMS];
 
     int allPlayersForTypes[ROOM_TYPES_COUNT];
@@ -104,6 +110,11 @@ struct Storage {
     struct ListPool listPool;
     struct LinkedList listOfPlans;
     struct PlanPool planPool;
+
+    sem_t protection;
+    sem_t isToEnter[MAX_PLAYERS];
+    sem_t entry[MAX_PLAYERS];
+    sem_t forLastToExit;
 };
 
 int initCheckPlan(struct Storage *storage, plan_index_t planIndex);
@@ -111,17 +122,9 @@ int checkPlan(struct Storage *storage, plan_index_t planIndex);
 
 struct Storage *getFromInput();
 
-#define SEM_PROTECTION 4444
-#define SEMS_ENTRY 5555
-#define SEMS_EXIT 6666
 
-struct Semaphores {
-    int protection;
-    int entry;
-    int exit;
-};
-int initSems(struct Storage const *storage, struct Semaphores *semaphores);
-int getSems(struct Storage const *storage, struct Semaphores *semaphores);
+int initSems(struct Storage *storage);
 
+int getType(size_t playerId, struct Storage* storage);
 
 #endif //ESCAPEROOM_STORAGE_H

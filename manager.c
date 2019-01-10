@@ -13,7 +13,6 @@ int main() {
     size_t n = storage->playerCount;
 
 
-    printf("OK\n");
     int pid;
     for (size_t i = 1; i <= n; i++) {
         pid = fork();
@@ -30,11 +29,18 @@ int main() {
                 continue;
         }
     }
-    printf("OK\n");
     for (size_t i = 1; i <= n; i++) {
-        SYSTEM2(wait(0) == -1, "wait"); // TODO: zwalniac zasoby
+        if (wait(0) == -1){
+            break;
+        }
     }
 
+    for(int i = 0; i <= n; i++){
+        sem_destroy(&storage->isToEnter[i]);
+        sem_destroy(&storage->entry[i]);
+    }
+    sem_destroy(&storage->forLastToExit);
+    sem_destroy(&storage->protection);
     munmap(storage, sizeof(struct Storage));
     shm_unlink(STORAGE);
 
