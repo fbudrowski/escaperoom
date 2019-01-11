@@ -35,7 +35,7 @@ int main() {
         }
     }
 
-    for(int i = 0; i <= n; i++){
+    for(int i = 0; i < MAX_PLAYERS; i++){
         sem_destroy(&storage->isToEnter[i]);
         sem_destroy(&storage->entry[i]);
     }

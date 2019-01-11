@@ -12,6 +12,20 @@ int compRooms(const void *room1, const void *room2) {
     return 1;
 }
 
+void printList(struct ListPool *listPool, struct LinkedList* list){
+    size_t elemId = list->starting;
+    char ans[211];
+    int pos = sprintf(ans, "List consists of following elems:");
+    while(elemId != LST_NULL && elemId != LST_INACTIVE){
+        struct ListNode* node = &listPool->nodes[elemId];
+
+        pos += sprintf(ans + pos , "%zu, ", node->value);
+
+        elemId = node->next;
+
+    }
+    DEBUG("%s\n", ans);
+}
 
 plan_index_t getEmptyPlan(struct PlanPool *planPool){
     plan_index_t i = planPool->currentInd;
@@ -20,6 +34,9 @@ plan_index_t getEmptyPlan(struct PlanPool *planPool){
         if (i >= MAX_PLANS)
             i -= MAX_PLANS;
         if (planPool->plans[i].room_type == PLAN_INACTIVE){
+            planPool->plans[i].assignedRoomNewId = 0;
+            planPool->plans[i].elements.starting = LST_INACTIVE;
+            planPool->plans[i].elements.ending = LST_INACTIVE;
             return (int) i;
         }
     }
@@ -36,6 +53,13 @@ int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value){
             if (list->ending != LST_INACTIVE && list->ending != LST_NULL){
                 pool->nodes[list->ending].next = i;
                 pool->nodes[i].prev = list->ending;
+                pool->nodes[i].next = LST_NULL;
+                list->ending = i;
+            }
+            else{
+                list->starting = list->ending = i;
+                pool->nodes[i].prev = LST_NULL;
+                pool->nodes[i].next = LST_NULL;
             }
             break;
         }
@@ -43,15 +67,9 @@ int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value){
     if (ct >= MAX_LIST_ELEMS)
         return -1;
 
-    if (list->ending == LST_NULL || list->ending == LST_INACTIVE){
-        list->starting = list->ending = i;
-        pool->nodes[i].prev = LST_NULL;
-    }
-    else{
-        list->ending = i;
-    }
     pool->nodes[i].value = value;
     pool->nodes[i].next = LST_NULL;
+
     return 0;
 }
 
@@ -99,14 +117,19 @@ void setUpLists(struct ListPool* pool, struct LinkedList* list, struct PlanPool*
 
 
 
-void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode) {
-    listClear(&planPool->plans[currentNode].elements, listPool);
-    DEBUG("Delete plan %zu, author %d\n", currentNode, planPool->plans[currentNode].author);
+void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, plan_index_t planIndex) {
+    node_index_t listElem = list->starting;
+    while (listElem != LST_NULL && listElem != LST_INACTIVE && listPool->nodes[listElem].value != planIndex) {
+        listElem = listPool->nodes[listElem].next;
+    }
 
-    node_index_t prev = listPool->nodes[currentNode].prev;
-    node_index_t next = listPool->nodes[currentNode].next;
+    listClear(&planPool->plans[planIndex].elements, listPool);
+    DEBUG("Delete plan %zu, author %d\n", planIndex, planPool->plans[planIndex].author);
 
-    listPool->nodes[currentNode].prev = listPool->nodes[currentNode].next = LST_INACTIVE;
+    node_index_t prev = listPool->nodes[listElem].prev;
+    node_index_t next = listPool->nodes[listElem].next;
+
+    listPool->nodes[listElem].prev = listPool->nodes[listElem].next = LST_INACTIVE;
 
     if (prev == LST_NULL && next == LST_NULL){
         list->starting = list->ending = LST_INACTIVE;
@@ -120,8 +143,8 @@ void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanP
         listPool->nodes[next].prev = prev;
         listPool->nodes[prev].next = next;
     }
-
 }
+
 
 int initCheckPlan(struct Storage *storage, plan_index_t planIndex){
     struct Plan *plan = &storage->planPool.plans[planIndex];
@@ -272,7 +295,7 @@ struct Storage *getFromInput() {
 int initSems(struct Storage *storage) { // Unix semaphores
     SYSTEM2(sem_init(&storage->protection, 1, 1) < 0, "seminit");
     SYSTEM2(sem_init(&storage->forLastToExit, 1, 0) < 0, "seminit");
-    for(int i = 0; i <= storage->playerCount + 1; i++){
+    for(int i = 0; i < MAX_PLAYERS; i++){
         SYSTEM2(sem_init(&storage->isToEnter[i], 1, 0) < 0, "seminit");
         SYSTEM2(sem_init(&storage->entry[i], 1, 0) < 0, "seminit");
     }

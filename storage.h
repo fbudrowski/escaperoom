@@ -79,13 +79,14 @@ struct PlanPool {
     struct Plan plans[MAX_PLANS];
     plan_index_t currentInd;
 };
+void printList(struct ListPool *listPool, struct LinkedList* list);
 
 plan_index_t getEmptyPlan(struct PlanPool *planPool);
 int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value);
 void listClear(struct LinkedList *list, struct ListPool *pool);
 plan_index_t addNewEmptyPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool);
 void setUpLists(struct ListPool *pool, struct LinkedList *list, struct PlanPool *planPool);
-void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t currentNode);
+void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t planIndex);
 
 
 struct Storage {

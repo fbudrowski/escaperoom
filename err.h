@@ -9,6 +9,7 @@ i konczy dzialanie */
 //#define SYSTEM2(x, monit) printf("Process %d, action %s\n", getpid(), monit);if(x) {WRITE_ERR(monit); exit(1);}
 #define SYSTEM2(x, monit) if(x) {WRITE_ERR(monit); exit(1);}
 
+#define ASSERT(x) if(x) {fprintf(stderr, "ASSERT\n");exit(-1);}
 
 #define DEBUG(args...) printf (args)
 

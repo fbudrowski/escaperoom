@@ -7,6 +7,7 @@
 #include <fcntl.h>           /* For O_* constants */
 #include <sys/sem.h>
 #include <stdbool.h>
+#include <assert.h>
 #include "err.h"
 #include "storage.h"
 
@@ -44,17 +45,8 @@ void playGameLogEntryStatus(struct Storage *storage, struct Plan *plan, struct R
 
 };
 
-void playGame(size_t playerId, struct Storage* storage, FILE* output){
-
+void playGameEntrySection(struct Storage* storage, struct Room* room, struct Plan* plan, size_t playerId){
     SYSTEM2(sem_wait(&storage->protection), "protection-");
-
-    struct Plan* plan = &storage->planPool.plans[storage->currentGameByPlayer[playerId]];
-    struct Room* room = &storage->rooms[plan->assignedRoomNewId];
-
-    storage->playerEnteredRoom[playerId] = 1;
-    playGameLogEntryStatus(storage,plan,room,playerId,output);
-
-
 
 
     ++room->inside;
@@ -64,7 +56,7 @@ void playGame(size_t playerId, struct Storage* storage, FILE* output){
         size_t element = plan->elements.starting;                   // Allows all others to enter the game
         while(element != LST_INACTIVE && element != LST_NULL){
             size_t localPlayer = storage->listPool.nodes[element].value;
-            DEBUG("Player %zu invites player %zu to play the game in %d\n", playerId, localPlayer, plan->assignedRoomNewId);
+            DEBUG("Player %zu invites player %zu to start the game in %d\n", playerId, localPlayer, plan->assignedRoomNewId);
             if (localPlayer != playerId){
                 SYSTEM2(sem_post(&storage->entry[localPlayer]) < 0, "entry semaphore+"); // Allow this one to enter
             }
@@ -72,19 +64,35 @@ void playGame(size_t playerId, struct Storage* storage, FILE* output){
         }
 
         SYSTEM2(sem_post(&storage->protection) < 0, "protection+");// Give protection
+
     }
     else {
+
         SYSTEM2(sem_post(&storage->protection) < 0, "protection+");// Give protection
         SYSTEM2(sem_wait(&storage->entry[playerId]) < 0, "entry semaphore-"); // Wait until allowed to enter
+
     }
-    DEBUG("Player %zu enters game in room %d\n", playerId, plan->assignedRoomNewId);
+}
+
+void playGame(size_t playerId, struct Storage* storage, FILE* output){
+
+    struct Plan* plan = &storage->planPool.plans[storage->currentGameByPlayer[playerId]];
+    struct Room* room = &storage->rooms[plan->assignedRoomNewId];
+
+
+    storage->playerEnteredRoom[playerId] = 1;
+    playGameLogEntryStatus(storage,plan,room,playerId,output);
+
+    playGameEntrySection(storage, room, plan, playerId);
+
+    DEBUG("Player %zu starts to play the game in room %d\n", playerId, plan->assignedRoomNewId);
 
 
     SYSTEM(sleep(rand() % 3)); //Play
 
 
 
-    DEBUG("Player %zu exits game in room %d\n", playerId, plan->assignedRoomNewId);
+    DEBUG("Player %zu ends to play the game in room %d\n", playerId, plan->assignedRoomNewId);
     SYSTEM2(sem_wait(&storage->protection) < 0, "protection-"); // Get protection
     --room->inside;
     storage->freePlayer[playerId] = 1;
@@ -97,15 +105,14 @@ void playGame(size_t playerId, struct Storage* storage, FILE* output){
     storage->playerInPlans[playerId]--;
 
 
-//    if (storage->alreadyFinishedWriting == storage->playerCount
-//        && storage->playerTypeInPlans[getType(playerId, storage)] == 0){
-//        for (int i = 1; i <= storage->playerCount; ++i){
-//            if (getType(playerId, storage) == getType((size_t) i, storage) && storage->playerInPlans[i] == 0){
-//                SYSTEM2(sem_post(&storage->isToEnter[i]), "isToEnter+");
-//            }
-//        }
-//    }
-
+    if (storage->alreadyFinishedWriting == storage->playerCount
+        && storage->playerTypeInPlans[getType(playerId, storage)] == 0){
+        for (int i = 1; i <= storage->playerCount; ++i){
+            if (getType(playerId, storage) == getType((size_t) i, storage) && storage->playerInPlans[i] == 0){
+                SYSTEM2(sem_post(&storage->isToEnter[i]), "isToEnter+");
+            }
+        }
+    }
 
     DEBUG("Leaving %zu, plan %d\n", playerId, planId);
     if (room->inside == 0){ // If we're the last to leave, clean up
@@ -118,31 +125,34 @@ void playGame(size_t playerId, struct Storage* storage, FILE* output){
         }
 
         listClear(&plan->elements, &storage->listPool);
-        deletePlan(&storage->listOfPlans, &storage->listPool, &storage->planPool, (node_index_t) planId);
+        deletePlan(&storage->listOfPlans, &storage->listPool, &storage->planPool, planId);
+        printList(&storage->listPool, &storage->listOfPlans);
 
         DEBUG("Player %zu tries to start any game\n", playerId);
 
         tryStartingAnyGame(playerId, storage);
+        DEBUG("Player %zu has finished looking for any new game\n", playerId);
     }
     SYSTEM2(sem_post(&storage->protection) < 0, "protection+");// Give protection
 }
 
 
-void readPlan(size_t playerId, struct Storage *storage, const char *planString, FILE* output) {
+void readPlan(size_t playerId, struct Storage *storage, const char *planString, FILE* output) { // Gets
     DEBUG("Player %zu reads the plan: %s\n", playerId, planString);
     plan_index_t planId = addNewEmptyPlan(&storage->listOfPlans, &storage->listPool, &storage->planPool);
+    printList(&storage->listPool, &storage->listOfPlans);
+
     struct Plan *plan = &storage->planPool.plans[planId];
     int pos = 0;
     sscanf(planString + pos, "%c %n", &plan->room_type, &pos);
     char local[7];
     int change = 0;
 
-    plan->author = playerId;
+    plan->author = (int) playerId;
 
 
     while (sscanf(planString + pos, "%s%n", local, &change) > 0) {
         ++plan->elem_count;
-        DEBUG("Plan Elem Count increase %d\n", plan->elem_count);
         pos += change;
         if ('A' <= local[0] && local[0] <= 'Z') {
             listAppend(&plan->elements, &storage->listPool, (size_t) local[0] + COLOR_ZERO - SMALLEST_ROOM);
@@ -152,24 +162,22 @@ void readPlan(size_t playerId, struct Storage *storage, const char *planString, 
         }
     }
     int ok = initCheckPlan(storage, planId);
-    DEBUG("Plan with status %d (size %d)\n", ok, plan->elem_count);
+    DEBUG("Player %zu has init-checked the plan %zu (%s) with status %d\n", playerId, planId, planString, ok);
     if (ok < 0) {
         fprintf(output, "Invalid plan: \"%s\"", planString);
         deletePlan(&storage->listOfPlans, &storage->listPool, &storage->planPool, planId);
+
     } else{
-        DEBUG("Plan to check\n"); fflush(stdout);
         ok = checkPlan(storage, planId);
-        DEBUG("Plan to go (%d)\n", ok); fflush(stdout);
+        DEBUG("Player %zu has checked the plan %zu with status %d\n",playerId, planId, ok); fflush(stdout);
         if (ok >= 0) {
             startGame(storage, plan, planId);
-            DEBUG("Game started\n"); fflush(stdout);
         }
-
     }
 
 }
 
-void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId) {
+void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId) { // MUST be called with protection, exits with protection
 
 
     struct Room* room = NULL;
@@ -179,7 +187,6 @@ void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId) 
     }
     DEBUG("One out of %zu rooms will be selected for game %zu\n", storage->roomCount, planId);
     for (size_t i = 0; i < storage->roomCount; i++){ // Getting a room
-//        DEBUG("Room %zu\n", i);
         if (storage->rooms[i].taken == 0 && !roomSelected && storage->rooms[i].type == plan->room_type
             && storage->rooms[i].capacity >= plan->elem_count){
             room = &storage->rooms[i];
@@ -197,16 +204,17 @@ void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId) 
     }
 
     node_index_t elemIterator = plan->elements.starting;
+    int count = 0;
     while(elemIterator != LST_INACTIVE && elemIterator != LST_NULL){ // Getting all named players to go
         size_t val = storage->listPool.nodes[elemIterator].value;
-        DEBUG("Elem %zu (COL0 = %d);\n",val, COLOR_ZERO);
+        ++count;
+        DEBUG("Plan %zu will have element %zu\n", planId, val);
         if (val < MAX_PLAYERS){
+            assert(storage->freePlayer[val] == 1);
             storage->freePlayer[val] = 0;
             storage->currentGameByPlayer[val] = (int) planId;
-            storage->playerInPlans[val]--;
-            storage->playerTypeInPlans[storage->playerPrefdRoom[val] - SMALLEST_ROOM]++;
             // Raise semaphore
-            DEBUG("Element %zu is to enter\n", val);
+            DEBUG("(1)Adding to plan %zu element %zu\n", planId, val);
             storage->playerEnteredRoom[val] = 0;
             SYSTEM2(sem_post(&storage->isToEnter[val]), "isToEnter+");
         } else{
@@ -215,18 +223,26 @@ void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId) 
         elemIterator = storage->listPool.nodes[elemIterator].next;
     }
 
+    DEBUG("Plan %zu has %d elements, should have %d\n", planId, count, plan->elem_count);
+
     elemIterator = plan->elements.starting;
 
     for(size_t i = 1; i <= storage->playerCount; i++){
         if (storage->freePlayer[i] && playersOfType[storage->playerPrefdRoom[i] - SMALLEST_ROOM] > 0){
+
             playersOfType[storage->playerPrefdRoom[i] - SMALLEST_ROOM]--;
-            storage->freePlayer[i]--;
+            storage->freePlayer[i] = 0;
+
             storage->currentGameByPlayer[i] = (int)planId;
             while (storage->listPool.nodes[elemIterator].value < COLOR_ZERO){
                 elemIterator = storage->listPool.nodes[elemIterator].next;
             }
+
+            storage->playerInPlans[i]++;
+            storage->playerTypeInPlans[getType(i, storage)]--;
+
             storage->listPool.nodes[elemIterator].value = i;
-            DEBUG("Element %zu is to enter (2)\n", i);
+            DEBUG("(2)Adding to plan %zu element %zu\n", planId, i);
             storage->playerEnteredRoom[i] = 0;
             SYSTEM2(sem_post(&storage->isToEnter[i]), "isToEnter+");// Raise semaphore
         }
@@ -234,7 +250,7 @@ void startGame(struct Storage *storage, struct Plan *plan, plan_index_t planId) 
 
 }
 
-void tryStartingAnyGame(size_t playerId, struct Storage *storage) { // MUST be called WITH protection
+void tryStartingAnyGame(size_t playerId, struct Storage *storage) { // MUST be called WITH protection, ends WITH protection
     node_index_t currentPlanNode = storage->listOfPlans.starting;
     while (currentPlanNode != LST_NULL && currentPlanNode != LST_INACTIVE) {
         plan_index_t planId = storage->listPool.nodes[currentPlanNode].value;
@@ -321,9 +337,11 @@ void player(size_t playerId){
         }
         else{ // Read the plan
             char *planString = fgets(allPlansString, 4 * MAX_PLAYERS, input);
+
             if (planString == NULL){
                 SYSTEM2(sem_post(&storage->protection), "protection+");// Give protection
-                break;
+//                break;
+                continue;
             }
             readPlan(playerId, storage, planString, output);
             SYSTEM2(sem_post(&storage->protection), "protection+"); // Give protection
@@ -341,9 +359,9 @@ void player(size_t playerId){
             }
         }
 
-        for(int i = 0; i < storage->playerCount; i++){
-            SYSTEM2(sem_post(&storage->forLastToExit) < 0, "forLastToExit");
-        }
+//        for(int i = 0; i < storage->playerCount; i++){
+//            SYSTEM2(sem_post(&storage->forLastToExit) < 0, "forLastToExit");
+//        }
     }
 
     int v;
@@ -359,16 +377,14 @@ void player(size_t playerId){
 
         if (// If this player is no longer needed
             storage->playerInPlans[playerId] == 0 &&
-            storage->playerTypeInPlans[storage->playerPrefdRoom[playerId] - SMALLEST_ROOM] == 0){
-            DEBUG("Player %zu wants to exit\n", playerId);
-            if (storage->alreadyFinishedWriting == storage->playerCount){
+            storage->playerTypeInPlans[storage->playerPrefdRoom[playerId] - SMALLEST_ROOM] == 0
+            && storage->alreadyFinishedWriting == storage->playerCount){
+                DEBUG("Player %zu wants to exit\n", playerId);
                 SYSTEM2(sem_post(&storage->protection) < 0, "protection+");
                 break;
-            }
-            else{
-                SYSTEM2(sem_post(&storage->protection) < 0, "protection+");
-                continue;
-            }
+        } else if (storage->currentGameByPlayer[playerId] == -1){
+            SYSTEM2(sem_post(&storage->protection) < 0, "protection+");
+            continue;
         }
 
         DEBUG("Player %zu enters the game %d\n", playerId, storage->currentGameByPlayer[playerId]);
