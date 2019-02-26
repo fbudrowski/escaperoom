@@ -12,14 +12,14 @@ int compRooms(const void *room1, const void *room2) {
     return 1;
 }
 
-void printList(struct ListPool *listPool, struct LinkedList* list){
+void printList(struct ListPool *listPool, struct LinkedList *list) {
     size_t elemId = list->starting;
     char ans[211];
     int pos = sprintf(ans, "List consists of following elems:");
-    while(elemId != LST_NULL && elemId != LST_INACTIVE){
-        struct ListNode* node = &listPool->nodes[elemId];
+    while (elemId != LST_NULL && elemId != LST_INACTIVE) {
+        struct ListNode *node = &listPool->nodes[elemId];
 
-        pos += sprintf(ans + pos , "%zu, ", node->value);
+        pos += sprintf(ans + pos, "%zu, ", node->value);
 
         elemId = node->next;
 
@@ -27,13 +27,13 @@ void printList(struct ListPool *listPool, struct LinkedList* list){
     DEBUG("%s\n", ans);
 }
 
-plan_index_t getEmptyPlan(struct PlanPool *planPool){
+plan_index_t getEmptyPlan(struct PlanPool *planPool) {
     plan_index_t i = planPool->currentInd;
     size_t ct = 0;
     for (; ct < MAX_PLANS; ++ct, ++i) {
         if (i >= MAX_PLANS)
             i -= MAX_PLANS;
-        if (planPool->plans[i].room_type == PLAN_INACTIVE){
+        if (planPool->plans[i].room_type == PLAN_INACTIVE) {
             planPool->plans[i].assignedRoomNewId = 0;
             planPool->plans[i].elements.starting = LST_INACTIVE;
             planPool->plans[i].elements.ending = LST_INACTIVE;
@@ -43,20 +43,19 @@ plan_index_t getEmptyPlan(struct PlanPool *planPool){
     return PLAN_NULL;
 }
 
-int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value){
+int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value) {
     node_index_t i = pool->currentInd;
     size_t ct = 0;
     for (; ct < MAX_LIST_ELEMS; ++ct, ++i) {
         if (i >= MAX_LIST_ELEMS)
             i -= MAX_LIST_ELEMS;
-        if (pool->nodes[i].next == LST_INACTIVE){
-            if (list->ending != LST_INACTIVE && list->ending != LST_NULL){
+        if (pool->nodes[i].next == LST_INACTIVE) {
+            if (list->ending != LST_INACTIVE && list->ending != LST_NULL) {
                 pool->nodes[list->ending].next = i;
                 pool->nodes[i].prev = list->ending;
                 pool->nodes[i].next = LST_NULL;
                 list->ending = i;
-            }
-            else{
+            } else {
                 list->starting = list->ending = i;
                 pool->nodes[i].prev = LST_NULL;
                 pool->nodes[i].next = LST_NULL;
@@ -73,9 +72,9 @@ int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value){
     return 0;
 }
 
-void listClear(struct LinkedList *list, struct ListPool *pool){
+void listClear(struct LinkedList *list, struct ListPool *pool) {
     node_index_t current = list->starting;
-    while(current != LST_INACTIVE && current != LST_NULL){
+    while (current != LST_INACTIVE && current != LST_NULL) {
         node_index_t prev = current;
         current = pool->nodes[prev].next;
         pool->nodes[prev].next = LST_INACTIVE;
@@ -83,12 +82,12 @@ void listClear(struct LinkedList *list, struct ListPool *pool){
     list->starting = list->ending = LST_INACTIVE;
 }
 
-plan_index_t addNewEmptyPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool){
+plan_index_t addNewEmptyPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool) {
     plan_index_t planId = getEmptyPlan(planPool);
     planPool->plans[planId].room_type = PLAN_PRESTART;
     planPool->plans[planId].elem_count = 0;
     planPool->plans[planId].assignedRoomNewId = -1;
-    if (planId == PLAN_NULL){
+    if (planId == PLAN_NULL) {
         return PLAN_NULL;
     }
     int ok = listAppend(list, listPool, planId);
@@ -100,21 +99,20 @@ plan_index_t addNewEmptyPlan(struct LinkedList *list, struct ListPool *listPool,
 }
 
 
-void setUpLists(struct ListPool* pool, struct LinkedList* list, struct PlanPool* planPool){
+void setUpLists(struct ListPool *pool, struct LinkedList *list, struct PlanPool *planPool) {
     pool->currentInd = 0;
-    for(int i = 0; i < MAX_LIST_ELEMS; i++) {
+    for (int i = 0; i < MAX_LIST_ELEMS; i++) {
         pool->nodes[i].next = LST_INACTIVE;
         pool->nodes[i].prev = LST_INACTIVE;
     }
     list->starting = LST_NULL;
     list->ending = LST_NULL;
 
-    for(int i = 0; i < MAX_PLANS; i++){
+    for (int i = 0; i < MAX_PLANS; i++) {
         planPool->plans[i].room_type = 0;
     }
     planPool->currentInd = 0;
 }
-
 
 
 void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, plan_index_t planIndex) {
@@ -131,12 +129,12 @@ void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanP
 
     listPool->nodes[listElem].prev = listPool->nodes[listElem].next = LST_INACTIVE;
 
-    if (prev == LST_NULL && next == LST_NULL){
+    if (prev == LST_NULL && next == LST_NULL) {
         list->starting = list->ending = LST_INACTIVE;
-    } else if (prev == LST_NULL){
+    } else if (prev == LST_NULL) {
         list->starting = next;
         listPool->nodes[next].prev = prev;
-    } else if (next == LST_NULL){
+    } else if (next == LST_NULL) {
         list->ending = prev;
         listPool->nodes[prev].next = next;
     } else {
@@ -145,68 +143,89 @@ void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanP
     }
 }
 
+int existInPlan[MAX_PLAYERS];
 
-int initCheckPlan(struct Storage *storage, plan_index_t planIndex){
+
+void cleanUpExistInPlan(const struct Plan *plan, const struct ListPool *listPool, node_index_t nodeIndex);
+
+int initCheckPlan(struct Storage *storage, plan_index_t planIndex) {
     struct Plan *plan = &storage->planPool.plans[planIndex];
     struct ListPool *listPool = &storage->listPool;
     node_index_t nodeIndex = plan->elements.starting;
 
-    if (storage->maxSizedRoom[plan->room_type - SMALLEST_ROOM] == -1){
+    if (storage->maxSizedRoom[plan->room_type - SMALLEST_ROOM] == -1) {
         return -1;
     }
     int remainingElems[ROOM_TYPES_COUNT];
+
     int count = 0;
-    for (int i = 0; i < ROOM_TYPES_COUNT; ++i){
+    for (int i = 0; i < ROOM_TYPES_COUNT; ++i) {
         remainingElems[i] = storage->allPlayersForTypes[i];
     }
 
-    while (nodeIndex != LST_NULL && nodeIndex != LST_INACTIVE){
+    while (nodeIndex != LST_NULL && nodeIndex != LST_INACTIVE) {
         size_t value = listPool->nodes[nodeIndex].value;
         size_t color = 0;
-        if (value >= COLOR_ZERO){
+        if (value >= COLOR_ZERO) {
             color = value - COLOR_ZERO;
-        } else{
+        } else {
+            if (existInPlan[value] == 1) {
+                cleanUpExistInPlan(plan, listPool, nodeIndex);
+                return -6;
+            }
             color = (size_t) (storage->playerPrefdRoom[value] - SMALLEST_ROOM);
         }
-        if (remainingElems[color] == 0){
+        if (remainingElems[color] == 0) {
+            cleanUpExistInPlan(plan, listPool, nodeIndex);
             return -2;
         }
         --remainingElems[color];
 
         nodeIndex = listPool->nodes[nodeIndex].next;
     }
-    if (count > storage->maxSizedRoom[plan->room_type - SMALLEST_ROOM]){
+    if (count > storage->maxSizedRoom[plan->room_type - SMALLEST_ROOM]) {
+        cleanUpExistInPlan(plan, listPool, nodeIndex);
         return -3;
     }
+    cleanUpExistInPlan(plan, listPool, nodeIndex);
     return 1;
 }
 
-int checkPlan(struct Storage *storage, plan_index_t planIndex){
+void cleanUpExistInPlan(const struct Plan *plan, const struct ListPool *listPool, node_index_t nodeIndex) {
+    node_index_t nodeIndexDel = plan->elements.starting;
+    while (nodeIndexDel != LST_NULL && nodeIndexDel != LST_INACTIVE && nodeIndexDel != nodeIndex) {
+        size_t valueDel = listPool->nodes[nodeIndexDel].value;
+        existInPlan[valueDel] = 0;
+        nodeIndexDel = listPool->nodes[nodeIndexDel].next;
+    }
+}
+
+int checkPlan(struct Storage *storage, plan_index_t planIndex) {
     struct Plan *plan = &storage->planPool.plans[planIndex];
     struct ListPool *listPool = &storage->listPool;
     node_index_t nodeIndex = plan->elements.starting;
 
-    if(storage->biggestFreeRoom[plan->room_type-SMALLEST_ROOM] < plan->elem_count){
+    if (storage->biggestFreeRoom[plan->room_type - SMALLEST_ROOM] < plan->elem_count) {
         return -1;
     }
 
     int remainingElems[ROOM_TYPES_COUNT];
-    for (int i = 0; i < ROOM_TYPES_COUNT; ++i){
+    for (int i = 0; i < ROOM_TYPES_COUNT; ++i) {
         remainingElems[i] = storage->remainingPlayersForTypes[i];
     }
-    while (nodeIndex != LST_NULL && nodeIndex != LST_INACTIVE){
+    while (nodeIndex != LST_NULL && nodeIndex != LST_INACTIVE) {
         size_t value = listPool->nodes[nodeIndex].value;
         size_t color = 0;
-        if (value >= COLOR_ZERO){
+        if (value >= COLOR_ZERO) {
             color = value - COLOR_ZERO;
-        } else{
-            if (storage->freePlayer[value] == 0){
+        } else {
+            if (storage->freePlayer[value] == 0) {
                 return -4;
             }
             color = (size_t) (storage->playerPrefdRoom[value] - SMALLEST_ROOM);
         }
-        DEBUG("\tCHK %zu %d %c\n", value, remainingElems[color], (char)color + SMALLEST_ROOM);
-        if (remainingElems[color] == 0){
+        DEBUG("\tCHK %zu %d %c\n", value, remainingElems[color], (char) color + SMALLEST_ROOM);
+        if (remainingElems[color] == 0) {
             return -2;
         }
         --remainingElems[color];
@@ -235,10 +254,11 @@ struct Storage *getFromInput() {
         SYSTEM2(1, "Mapping fail");
     }
 
+    storage->finished = 0;
     storage->alreadyFinishedWriting = 0;
     storage->playerCount = n;
     storage->roomCount = m;
-    for(int i = 0; i < ROOM_TYPES_COUNT; i++){
+    for (int i = 0; i < ROOM_TYPES_COUNT; i++) {
         storage->biggestFreeRoom[i] = -1;
         storage->maxSizedRoom[i] = -1;
         storage->allPlayersForTypes[i] = 0;
@@ -255,21 +275,22 @@ struct Storage *getFromInput() {
         storage->rooms[i].inside = 0;
         storage->rooms[i].taken = 0;
         storage->rooms[i].roomOriginalId = i + 1;
-        if ((int)capacity > storage->maxSizedRoom[type-SMALLEST_ROOM]){
-            storage->maxSizedRoom[type-SMALLEST_ROOM] = (int) capacity;
-            storage->biggestFreeRoom[type-SMALLEST_ROOM] = (int) capacity;
+        if ((int) capacity > storage->maxSizedRoom[type - SMALLEST_ROOM]) {
+            storage->maxSizedRoom[type - SMALLEST_ROOM] = (int) capacity;
+            storage->biggestFreeRoom[type - SMALLEST_ROOM] = (int) capacity;
         }
-        DEBUG("%zu (%zu), %c %zu %d; %d %d\n"
-                , i, m, storage->rooms[i].type,
-                storage->rooms[i].capacity, storage->rooms[i].inside,
-                storage->maxSizedRoom[type - SMALLEST_ROOM],
-                storage->biggestFreeRoom[type - SMALLEST_ROOM]); //Test print
+        DEBUG("%zu (%zu), %c %zu %d; %d %d\n", i, m, storage->rooms[i].type,
+              storage->rooms[i].capacity, storage->rooms[i].inside,
+              storage->maxSizedRoom[type - SMALLEST_ROOM],
+              storage->biggestFreeRoom[type - SMALLEST_ROOM]); //Test print
     }
-    for (size_t i = 1; i <= n; i++){
+    for (size_t i = 1; i <= n; i++) {
+        existInPlan[i] = 0;
         storage->freePlayer[i] = 1;
         storage->currentGameByPlayer[i] = -1;
         storage->playerInPlans[i] = 0;
         storage->playerPrefdRoom[i] = 0;
+        storage->gamesPlayedByPlayer[i] = 0;
     }
     DEBUG("OK\n");
     qsort(storage->rooms, m, sizeof(struct Room), compRooms);
@@ -277,14 +298,14 @@ struct Storage *getFromInput() {
     setUpLists(&storage->listPool, &storage->listOfPlans, &storage->planPool);
 
     char filename[30];
-    for (size_t i = 1; i <= n; i++){
+    for (size_t i = 1; i <= n; i++) {
         sprintf(filename, "player-%zu.in", i);
         int ithFd = open(filename, O_RDONLY);
         SYSTEM2(ithFd < 0, "Bad read");
-        char a; read(ithFd, &a, 1);
-//        DEBUG("Player %zu has %c type\n", i, a);
+        char a;
+        read(ithFd, &a, 1);
         storage->playerPrefdRoom[i] = a;
-        ++storage->allPlayersForTypes[a-SMALLEST_ROOM];
+        ++storage->allPlayersForTypes[a - SMALLEST_ROOM];
         close(ithFd);
     }
     initSems(storage);
@@ -292,10 +313,10 @@ struct Storage *getFromInput() {
     return storage;
 }
 
-int initSems(struct Storage *storage) { // Unix semaphores
+int initSems(struct Storage *storage) {
     SYSTEM2(sem_init(&storage->protection, 1, 1) < 0, "seminit");
     SYSTEM2(sem_init(&storage->forLastToExit, 1, 0) < 0, "seminit");
-    for(int i = 0; i < MAX_PLAYERS; i++){
+    for (int i = 0; i < MAX_PLAYERS; i++) {
         SYSTEM2(sem_init(&storage->isToEnter[i], 1, 0) < 0, "seminit");
         SYSTEM2(sem_init(&storage->entry[i], 1, 0) < 0, "seminit");
     }

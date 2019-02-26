@@ -19,6 +19,8 @@
 #include "storage.h"
 
 
-void playGame(size_t playerId, struct Storage* storage, struct Semaphores* semaphores, FILE* output)
+void playGame(size_t playerId, struct Storage *storage, FILE *output);
+
 void player(size_t id);
+
 #endif //ESCAPEROOM_PLAYER_H

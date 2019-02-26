@@ -23,19 +23,24 @@ int main() {
                 SYSTEM2(1, "fork");
             case 0: // child process
                 munmap(storage, sizeof(struct Storage));
-                player(i);
+                char ans[11];
+                sprintf(ans, "%zu", i);
+                SYSTEM2(execlp("./player", ans, (char *) NULL), "Player start\n");
                 return 0;
             default:
                 continue;
         }
     }
     for (size_t i = 1; i <= n; i++) {
-        if (wait(0) == -1){
+        if (wait(0) == -1) {
             break;
         }
+
+        size_t playerId = storage->endings[i];
+        printf("Player %zu left after %d game(s)\n", playerId, storage->gamesPlayedByPlayer[playerId]);
     }
 
-    for(int i = 0; i < MAX_PLAYERS; i++){
+    for (int i = 0; i < MAX_PLAYERS; i++) {
         sem_destroy(&storage->isToEnter[i]);
         sem_destroy(&storage->entry[i]);
     }

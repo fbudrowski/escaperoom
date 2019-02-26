@@ -1,9 +1,8 @@
 #include "player.h"
 
 
-
-int main(int argc, char** argv){
+int main(int argc, char **argv) {
     long int k = strtol(argv[0], NULL, 10);
-    player(k);
-
+    player((size_t) k);
+    return 0;
 }

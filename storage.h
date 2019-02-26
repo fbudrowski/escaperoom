@@ -34,7 +34,6 @@
 #define PLAN_PRESTART (3)
 
 
-
 void player(size_t playerId);
 
 typedef size_t plan_index_t;
@@ -79,13 +78,19 @@ struct PlanPool {
     struct Plan plans[MAX_PLANS];
     plan_index_t currentInd;
 };
-void printList(struct ListPool *listPool, struct LinkedList* list);
+
+void printList(struct ListPool *listPool, struct LinkedList *list);
 
 plan_index_t getEmptyPlan(struct PlanPool *planPool);
+
 int listAppend(struct LinkedList *list, struct ListPool *pool, size_t value);
+
 void listClear(struct LinkedList *list, struct ListPool *pool);
+
 plan_index_t addNewEmptyPlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool);
+
 void setUpLists(struct ListPool *pool, struct LinkedList *list, struct PlanPool *planPool);
+
 void deletePlan(struct LinkedList *list, struct ListPool *listPool, struct PlanPool *planPool, node_index_t planIndex);
 
 
@@ -98,6 +103,10 @@ struct Storage {
     int playerEnteredRoom[MAX_PLAYERS];
     int playerInPlans[MAX_PLAYERS];
     int playerTypeInPlans[ROOM_TYPES_COUNT];
+    int gamesPlayedByPlayer[MAX_PLAYERS];
+
+    int endings[MAX_PLAYERS];
+    int finished;
 
     size_t playerCount;
     size_t roomCount;
@@ -119,6 +128,7 @@ struct Storage {
 };
 
 int initCheckPlan(struct Storage *storage, plan_index_t planIndex);
+
 int checkPlan(struct Storage *storage, plan_index_t planIndex);
 
 struct Storage *getFromInput();
@@ -126,6 +136,6 @@ struct Storage *getFromInput();
 
 int initSems(struct Storage *storage);
 
-int getType(size_t playerId, struct Storage* storage);
+int getType(size_t playerId, struct Storage *storage);
 
 #endif //ESCAPEROOM_STORAGE_H
