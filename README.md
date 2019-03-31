@@ -19,4 +19,4 @@ The process `player` is initiated by the manager, via `fork` and `execlp`. It re
 The first line of that file has a favourite-type letter. Each following line has a game proposal: firstly a letter indicating room type, and then some amount of numbers and/or letters describing players or player-preferred-room-types.
 
 #### Additional restrictions
-Could use only shared memory and semaphores. Limits for n: 2 <= n <= 1000, m: 1 <= m <= 1000
+Could use only shared memory and semaphores for IPC. Limits for n: 2 <= n <= 1000, m: 1 <= m <= 1000
